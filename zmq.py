@@ -60,3 +60,82 @@ class ThreadedSubscriber(threading.Thread):
         self.join()  # wait for thread to finish
         self.socket.close()
         self.context.term()
+
+        
+class LPClient(object):
+    """Lazy Pirate Client, will connect to a server with polling, does 
+    REQUEST_RETRIES tries with REQUEST_TIMEOUT before closing. Execute in main
+    thread with blocking.
+    """
+
+    def __init__(self, 
+        server,
+        port,
+        REQUEST_TIMEOUT = 2500,
+        REQUEST_RETRIES = 3,
+        ):
+
+        super(LPClient, self).__init__()
+
+        self.REQUEST_TIMEOUT = REQUEST_TIMEOUT
+        self.REQUEST_RETRIES = REQUEST_RETRIES
+        self.SERVER_ENDPOINT = "tcp://"+server+":%s" % port
+
+        logger.info(self.SERVER_ENDPOINT)
+
+        self.context = zmq.Context(1)
+
+        logger.info("I: Connecting to server")
+        self.client = self.context.socket(zmq.REQ)
+        self.client.connect(self.SERVER_ENDPOINT)
+
+        self.poll = zmq.Poller()
+        self.poll.register(self.client, zmq.POLLIN)
+
+    def send_pyobj(self, request):
+        retries_left = self.REQUEST_RETRIES
+
+        while retries_left:
+
+            logger.info("I: Sending (%s)" % request)
+            self.client.send_pyobj(request)
+
+            expect_reply = True
+            while expect_reply:
+                socks = dict(self.poll.poll(self.REQUEST_TIMEOUT))
+
+                if socks.get(self.client) == zmq.POLLIN:
+                    reply = self.client.recv_pyobj()
+
+                    if not reply:
+                        break
+
+                    if reply: ## reply code is ok
+                        logger.info("I: Server replied OK (%s)" % reply)
+                        retries_left = 0#self.REQUEST_RETRIES
+                        expect_reply = False
+                    else:
+                        logger.info("E: Malformed reply from server: %s" % reply)
+
+                else:
+                    logger.info("W: No response from server, retrying")
+                    # Socket is confused. Close and remove it.
+                    self.client.setsockopt(zmq.LINGER, 0)
+                    self.client.close()
+                    self.poll.unregister(self.client)
+                    retries_left -= 1
+                    if retries_left == 0:
+                        logger.info("E: Server seems to be offline, abandoning")
+                        raise ConnectionError(self.SERVER_ENDPOINT+' is offline', 0)
+                        # break
+                    logger.info("I: Reconnecting and resending (%s)" % request)
+
+                    # Create new connection
+                    self.client = self.context.socket(zmq.REQ)
+                    self.client.connect(self.SERVER_ENDPOINT)
+                    self.poll.register(self.client, zmq.POLLIN)
+                    self.client.send_pyobj(request)
+
+    def term(self):
+        ## could be put in a enter/exit
+        self.context.term()
