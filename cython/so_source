@@ -1,0 +1,150 @@
+#--------------------------------------------------------------------------------
+cat >f.pyx <<\!
+# f.pyx: numpy arrays -> extern from "fc.h"
+# 3 steps:
+# cython f.pyx  -> f.c
+# link: python f-setup.py build_ext --inplace  -> f.so, a dynamic library
+# py test-f.py: import f gets f.so, f.fpy below calls fc()
+
+import numpy as np
+cimport numpy as np
+
+cdef extern from "fc.h": 
+    int fc( int N, double* a, double* b, double* z )  # z = a + b
+
+def fpy( N,
+    np.ndarray[np.double_t,ndim=1] A,
+    np.ndarray[np.double_t,ndim=1] B,
+    np.ndarray[np.double_t,ndim=1] Z ):
+    """ wrap np arrays to fc( a.data ... ) """
+    assert N <= len(A) == len(B) == len(Z)
+    fcret = fc( N, <double*> A.data, <double*> B.data, <double*> Z.data )
+        # fcret = fc( N, A.data, B.data, Z.data )  grr char*
+    return fcret
+
+!
+
+#--------------------------------------------------------------------------------
+cat >fc.h <<\!
+// fc.h: numpy arrays from cython , double*
+
+int fc( int N, const double a[], const double b[], double z[] );
+!
+
+#--------------------------------------------------------------------------------
+cat >fc.cpp <<\!
+// fc.cpp: z = a + b, numpy arrays from cython
+
+#include "fc.h"
+#include <stdio.h>
+
+int fc( int N, const double a[], const double b[], double z[] )
+{
+    printf( "fc: N=%d a[0]=%f b[0]=%f \n", N, a[0], b[0] );
+    for( int j = 0;  j < N;  j ++ ){
+        z[j] = a[j] + b[j];
+    }
+    return N;
+}
+!
+
+#--------------------------------------------------------------------------------
+cat >f-setup.py <<\!
+# python f-setup.py build_ext --inplace
+#   cython f.pyx -> f.cpp
+#   g++ -c f.cpp -> f.o
+#   g++ -c fc.cpp -> fc.o
+#   link f.o fc.o -> f.so
+
+# distutils uses the Makefile distutils.sysconfig.get_makefile_filename()
+# for compiling and linking: a sea of options.
+
+# http://docs.python.org/distutils/introduction.html
+# http://docs.python.org/distutils/apiref.html  20 pages ...
+# https://stackoverflow.com/questions/tagged/distutils+python
+
+import numpy
+from distutils.core import setup
+from distutils.extension import Extension
+from Cython.Distutils import build_ext
+# from Cython.Build import cythonize
+
+ext_modules = [Extension(
+    name="f",
+    sources=["f.pyx", "fc.cpp"],
+        # extra_objects=["fc.o"],  # if you compile fc.cpp separately
+    include_dirs = [numpy.get_include()],  # .../site-packages/numpy/core/include
+    language="c++",
+        # libraries=
+        # extra_compile_args = "...".split(),
+        # extra_link_args = "...".split()
+    )]
+
+setup(
+    name = 'f',
+    cmdclass = {'build_ext': build_ext},
+    ext_modules = ext_modules,
+        # ext_modules = cythonize(ext_modules)  ? not in 0.14.1
+    # version=
+    # description=
+    # author=
+    # author_email=
+    )
+
+# test: import f
+!
+
+#--------------------------------------------------------------------------------
+cat >test-f.py <<\!
+#!/usr/bin/env python
+# test-f.py
+
+import numpy as np
+import f  # loads f.so from cc-lib: f.pyx -> f.c + fc.o -> f.so
+
+N = 3
+a = np.arange( N, dtype=np.float64 )
+b = np.arange( N, dtype=np.float64 )
+z = np.ones( N, dtype=np.float64 ) * np.NaN
+
+fret = f.fpy( N, a, b, z )
+print "fpy -> fc z:", z
+
+!
+
+#--------------------------------------------------------------------------------
+cat >cc-lib-mac <<\!
+#!/bin/sh
+me=${0##*/}
+case $1 in
+"" )
+    set --  f.cpp fc.cpp ;;  # default: g++ these
+-h* | --h* )
+    echo "
+$me [g++ flags] xx.c yy.cpp zz.o ...
+    compiles .c .cpp .o files to a dynamic lib xx.so
+"
+    exit 1
+esac
+
+# Logically this is simple, compile and link,
+# but platform-dependent, layers upon layers, gloom, doom
+
+base=${1%.c*}
+base=${base%.o}
+set -x
+
+g++ -dynamic -arch ppc \
+    -bundle -undefined dynamic_lookup \
+    -fno-strict-aliasing -fPIC -fno-common -DNDEBUG `# -g` -fwrapv \
+    -isysroot /Developer/SDKs/MacOSX10.4u.sdk \
+    -I/Library/Frameworks/Python.framework/Versions/2.6/include/python2.6 \
+    -I${Pysite?}/numpy/core/include \
+    -O2 -Wall \
+    "$@" \
+    -o $base.so
+
+# undefs: nm -gpv $base.so | egrep '^ *U _+[^P]'
+!
+
+# 23 Feb 2011 13:38
