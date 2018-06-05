@@ -19,7 +19,7 @@ from PyQt5 import uic
 class MainWindow(QMainWindow):
     def __init__(self):
         super(MainWindow, self).__init__()
-        uic.loadUi('os.path.dirname(__file__)+'/gui/mainwindow.ui', self)
+        uic.loadUi(os.path.dirname(__file__)+'/gui/mainwindow.ui', self)
         self.show()
 
 
