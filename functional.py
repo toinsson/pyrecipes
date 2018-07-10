@@ -26,7 +26,8 @@ class AxisFilter(object):
         self.si = StepInterpolator(stepsize)
 
         # low-pass filter
-        self.lpf = LowPassFilter(**kwargs)
+        # sampling_frequency = 1e3/stepsize
+        self.lpf = LowPassFilter(sampling_frequency = 1.e3/stepsize, **kwargs)
 
         # we do not compensate for h in sgf
         self.sgf = SavitskyGolayFitter(window_length, polyorder, derivative_number)
@@ -51,6 +52,14 @@ class AxisFilter(object):
             ns = np.vstack([ns, np.r_[t, self.sgf.new_sample(point)]])
 
         return ns
+
+
+    def batch_filter(self, times, values):
+        xy_ = []
+        for xy in zip(times, values):
+            xy_.append(self.new_sample(*xy))
+        xy_ = np.vstack(xy_)
+        return xy_
 
 
 class StepInterpolator(object):
@@ -82,11 +91,23 @@ class StepInterpolator(object):
         return np.c_[self.time_steps, self.value_steps]
 
 
+import warnings
 import scipy.signal
 class LowPassFilter(object):
     """docstring for ClassName"""
     def __init__(self, lowcut=15, sampling_frequency=50, order=5):
         super(LowPassFilter, self).__init__()
+
+        # low has to be in [0,1[
+        # fs = sampling_frequency
+        # nyq = 0.5 * fs
+        # low = lowcut / nyq
+        # min_low = 0
+        # max_low = 1
+        # issue warning about the change behavior
+        if lowcut > (0.5 * sampling_frequency):
+            lowcut = (0.5 * sampling_frequency) - 1e-3
+            warnings.warn("LPF - setting lowcut to 1./sampling_rate instead of {}".format(lowcut))
 
         def _butter_lowpass(lowcut, sampling_frequency, order=5):
             order = order
@@ -289,5 +310,4 @@ class RingBuffer(object):
     @property
     def size(self):
         return self.n_samples
-
 

@@ -1,6 +1,8 @@
 import zmq
 import threading
-import queue
+
+import six
+from six.moves import queue
 import logging
 
 class Publisher(object):
