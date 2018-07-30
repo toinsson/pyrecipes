@@ -63,7 +63,7 @@ class ThreadedSubscriber(threading.Thread):
         self.socket.close()
         self.context.term()
 
-        
+
 class LPClient(object):
     """Lazy Pirate Client, will connect to a server with polling, does 
     REQUEST_RETRIES tries with REQUEST_TIMEOUT before closing. Execute in main
