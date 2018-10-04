@@ -46,7 +46,7 @@ class ThreadedSubscriber(threading.Thread):
         self.is_looping.set()
 
         while self.is_looping.is_set():
-            socks = dict(self.poller.poll())
+            socks = dict(self.poller.poll(500))  # timeout for triggering stop
 
             # if socks.get(self.socket) == zmq.POLLIN:
             if self.socket in socks and socks[self.socket] == zmq.POLLIN:
