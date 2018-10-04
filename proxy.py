@@ -66,13 +66,13 @@ class ProxyServer(threading.Thread):
                     # exception, return the full exception info
                     info = sys.exc_info()
                     tb = "\n".join(traceback.format_exception(*info, limit=20))
-                    socket.send_pyobj((False, (info[1], tb)), protocol=-1)
+                    self.rep.send_pyobj((False, (info[1], tb)), protocol=-1)
 
 
     def close(self):
         self.is_looping.clear()
         self.join()  # wait for thread to finish
-        self.socket.close()
+        self.rep.close()
         self.context.term()
 
 
@@ -85,6 +85,9 @@ class ProxyClient(object):
     Redirects calls and property accesses to the real, remote logging object
     """
     def __init__(self, obj, port=8123):
+
+        # possibly init obj
+        # super(type(obj), self).__init__()
 
         self.obj = obj
         self.port = port
@@ -113,7 +116,7 @@ class ProxyClient(object):
         # redirect calls to the remote object
         else:
             def proxy(*args, **kwargs):
-                self.socket.send_pyobj((self.obj.__class__, attr, args, kwargs), protocol=-1)
+                self.socket.send_pyobj(('(self.obj)', attr, args, kwargs), protocol=-1)
                 success, value = self.socket.recv_pyobj()
                 if success:
                     return value
